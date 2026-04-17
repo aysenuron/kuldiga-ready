@@ -7,10 +7,13 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { text } = req.body ?? {};
+  const { text, targetLang = 'lv' } = req.body ?? {};
   if (!text?.trim()) {
     return res.status(400).json({ error: 'No text provided' });
   }
+
+  const targetNames = { lv: 'Latvian', fi: 'Finnish', et: 'Estonian' };
+  const targetName = targetNames[targetLang] ?? 'Latvian';
 
   try {
     const message = await client.messages.create({
@@ -19,7 +22,7 @@ export default async function handler(req, res) {
       messages: [
         {
           role: 'user',
-          content: `Detect whether the following text is English or Latvian, then translate it to the other language. Respond with only valid JSON, exactly: {"detectedLang":"en","translation":"..."} or {"detectedLang":"lv","translation":"..."}\n\nText: ${text}`,
+          content: `Detect whether the following text is English or ${targetName}. If it is English, translate it to ${targetName}. If it is ${targetName} (or any non-English language), translate it to English. Respond with only valid JSON, exactly: {"detectedLang":"en","translation":"..."} or {"detectedLang":"${targetLang}","translation":"..."}\n\nText: ${text}`,
         },
       ],
     });

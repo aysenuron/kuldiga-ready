@@ -14,7 +14,13 @@ const STATUS = {
   ERROR: 'error',
 };
 
-const SPEAK_LANG = { en: 'en-US', lv: 'lv-LV' };
+const SPEAK_LANG = { en: 'en-US', lv: 'lv-LV', fi: 'fi-FI', et: 'et-EE' };
+
+const TARGET_LANGS = [
+  { code: 'lv', label: 'Latvian', flag: '🇱🇻' },
+  { code: 'fi', label: 'Finnish', flag: '🇫🇮' },
+  { code: 'et', label: 'Estonian', flag: '🇪🇪' },
+];
 
 function MicIcon() {
   return (
@@ -55,6 +61,7 @@ export default function App() {
   const [translation, setTranslation] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [textInput, setTextInput] = useState('');
+  const [targetLang, setTargetLang] = useState('lv');
   const textInputRef = useRef(null);
 
   const { speak, speaking, cancel } = useSpeechSynthesis();
@@ -65,16 +72,16 @@ export default function App() {
       setTranscript(text);
       setStatus(STATUS.TRANSLATING);
       try {
-        const { detectedLang: lang, translation: result } = await detectAndTranslate(text);
+        const { detectedLang: lang, translation: result } = await detectAndTranslate(text, targetLang);
         setTranslation(result);
         setStatus(STATUS.DONE);
-        speak(result, SPEAK_LANG[lang === 'en' ? 'lv' : 'en']);
+        speak(result, SPEAK_LANG[lang === 'en' ? targetLang : 'en']);
       } catch (err) {
         setErrorMsg(err.message);
         setStatus(STATUS.ERROR);
       }
     },
-    [speak],
+    [speak, targetLang],
   );
 
   const handleMicTap = useCallback(async () => {
@@ -156,6 +163,19 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <span className="app-name">Kuldiga Ready</span>
+        <div className="lang-selector" role="group" aria-label="Target language">
+          {TARGET_LANGS.map(({ code, label, flag }) => (
+            <button
+              key={code}
+              className={`lang-pill${targetLang === code ? ' is-active' : ''}`}
+              onClick={() => setTargetLang(code)}
+              aria-pressed={targetLang === code}
+            >
+              <span aria-hidden="true">{flag}</span>
+              {label}
+            </button>
+          ))}
+        </div>
       </header>
 
       <main className="result-area">

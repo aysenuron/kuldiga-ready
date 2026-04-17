@@ -72,6 +72,35 @@
   color: var(--text-faint);
 }
 
+.lang-selector {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  justify-content: center;
+}
+
+.lang-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1.5px solid #e0e0e0;
+  background: transparent;
+  font-size: 12px;
+  font-family: var(--font);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.lang-pill.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(124, 63, 255, 0.06);
+}
+
 
 /* ── Result area ── */
 
