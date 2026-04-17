@@ -234,6 +234,7 @@ export default function App() {
             </svg>
           </button>
         </form>
+        <p className="app-credit">Built by Ayşenur Onaran</p>
       </footer>
     </div>
   );
