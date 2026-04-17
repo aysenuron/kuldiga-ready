@@ -1,12 +1,15 @@
 import { useState, useRef, useCallback } from 'react';
 import { detectAndTranslate } from './api/translate';
+import { transcribeAudio } from './api/transcribe';
+import { useMediaRecorder } from './hooks/useMediaRecorder';
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
 import './App.css';
 
 const STATUS = {
   IDLE: 'idle',
-  LISTENING: 'listening',
-  TRANSLATING: 'translating',
+  LISTENING: 'listening',       // MediaRecorder is recording
+  TRANSCRIBING: 'transcribing', // waiting for Whisper
+  TRANSLATING: 'translating',   // waiting for Claude
   DONE: 'done',
   ERROR: 'error',
 };
@@ -32,20 +35,13 @@ function StopIcon() {
   );
 }
 
-// Splits text into per-character spans with staggered animation-delay.
-// Adaptive delay: shorter texts get more dramatic stagger, longer texts finish faster.
 function AnimatedText({ text, className, isSpeaking }) {
   const chars = Array.from(text);
   const perCharDelay = Math.min(16, 380 / chars.length);
-
   return (
     <p className={`${className}${isSpeaking ? ' is-speaking' : ''}`}>
       {chars.map((char, i) => (
-        <span
-          key={i}
-          className="char"
-          style={{ animationDelay: `${i * perCharDelay}ms` }}
-        >
+        <span key={i} className="char" style={{ animationDelay: `${i * perCharDelay}ms` }}>
           {char === ' ' ? '\u00A0' : char}
         </span>
       ))}
@@ -57,22 +53,19 @@ export default function App() {
   const [status, setStatus] = useState(STATUS.IDLE);
   const [transcript, setTranscript] = useState('');
   const [translation, setTranslation] = useState('');
-  const [detectedLang, setDetectedLang] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [textInput, setTextInput] = useState('');
-  const lvSupportedRef = useRef(null);
   const textInputRef = useRef(null);
 
   const { speak, speaking, cancel } = useSpeechSynthesis();
-  const recognitionRef = useRef(null);
+  const { start: startRecording, stop: stopRecording } = useMediaRecorder();
 
-  const handleTranscript = useCallback(
+  const handleTranslate = useCallback(
     async (text) => {
       setTranscript(text);
       setStatus(STATUS.TRANSLATING);
       try {
         const { detectedLang: lang, translation: result } = await detectAndTranslate(text);
-        setDetectedLang(lang);
         setTranslation(result);
         setStatus(STATUS.DONE);
         speak(result, SPEAK_LANG[lang === 'en' ? 'lv' : 'en']);
@@ -84,75 +77,46 @@ export default function App() {
     [speak],
   );
 
-  const startRecognition = useCallback(
-    (lang) => {
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SR) {
-        setErrorMsg('Speech recognition is not supported in this browser. Please type below.');
-        setStatus(STATUS.ERROR);
-        return;
-      }
-
-      const rec = new SR();
-      rec.lang = lang;
-      rec.continuous = false;
-      rec.interimResults = false;
-      rec.maxAlternatives = 1;
-
-      rec.onresult = (e) => {
-        const { transcript, confidence } = e.results[0][0];
-        // confidence is 0 when the browser doesn't report it — skip threshold in that case
-        if (confidence > 0 && confidence < 0.7) {
+  const handleMicTap = useCallback(async () => {
+    // Stop recording → send to Whisper
+    if (status === STATUS.LISTENING) {
+      setStatus(STATUS.TRANSCRIBING);
+      try {
+        const blob = await stopRecording();
+        const { transcript: text } = await transcribeAudio(blob);
+        if (!text?.trim()) {
           setErrorMsg("Didn't catch that, try again.");
           setStatus(STATUS.IDLE);
           return;
         }
-        setTextInput(transcript);
+        setTextInput(text);
         setStatus(STATUS.IDLE);
         setTimeout(() => textInputRef.current?.focus(), 50);
-      };
-
-      rec.onerror = (e) => {
-        const isLangError =
-          e.error === 'language-not-supported' || e.error === 'service-not-allowed';
-        if (isLangError && lang === 'lv-LV') {
-          lvSupportedRef.current = false;
-          startRecognition('en-US');
-          return;
-        }
-        if (e.error === 'no-speech') {
-          setStatus(STATUS.IDLE);
-          return;
-        }
-        setErrorMsg(e.error);
+      } catch (err) {
+        setErrorMsg(err.message);
         setStatus(STATUS.ERROR);
-      };
-
-      rec.onend = () => {
-        setStatus((prev) => (prev === STATUS.LISTENING ? STATUS.IDLE : prev));
-      };
-
-      recognitionRef.current = rec;
-      rec.start();
-      setStatus(STATUS.LISTENING);
-    },
-    [],
-  );
-
-  const handleMicTap = useCallback(() => {
-    if (status === STATUS.LISTENING) {
-      recognitionRef.current?.stop();
-      setStatus(STATUS.IDLE);
+      }
       return;
     }
+
+    // Start recording
     if (speaking) cancel();
     setTextInput('');
     setTranscript('');
     setTranslation('');
-    setDetectedLang(null);
     setErrorMsg('');
-    startRecognition(lvSupportedRef.current === false ? 'en-US' : 'lv-LV');
-  }, [status, speaking, cancel, startRecognition]);
+    try {
+      await startRecording();
+      setStatus(STATUS.LISTENING);
+    } catch (err) {
+      const msg =
+        err.name === 'NotAllowedError'
+          ? 'Microphone access denied. Please allow it in your browser settings.'
+          : err.message ?? 'Could not start recording.';
+      setErrorMsg(msg);
+      setStatus(STATUS.ERROR);
+    }
+  }, [status, speaking, cancel, startRecording, stopRecording]);
 
   const handleTextSubmit = useCallback(
     async (e) => {
@@ -163,33 +127,27 @@ export default function App() {
       if (speaking) cancel();
       setTranscript('');
       setTranslation('');
-      setDetectedLang(null);
       setErrorMsg('');
-      await handleTranscript(text);
+      await handleTranslate(text);
     },
-    [textInput, speaking, cancel, handleTranscript],
+    [textInput, speaking, cancel, handleTranslate],
   );
 
   const statusLabel = {
-    [STATUS.IDLE]:
-      lvSupportedRef.current === false
-        ? 'Tap to speak — using English recognition'
-        : 'Tap to speak',
-    [STATUS.LISTENING]: 'Listening…',
-    [STATUS.TRANSLATING]: 'Translating…',
-    [STATUS.DONE]:
-      detectedLang === 'en'
-        ? 'English → Latvian'
-        : detectedLang === 'lv'
-          ? 'Latvian → English'
-          : '',
+    [STATUS.IDLE]: '',
+    [STATUS.LISTENING]: 'Recording…',
+    [STATUS.TRANSCRIBING]: 'Transcribing…',
+    [STATUS.TRANSLATING]: '',
+    [STATUS.DONE]: '',
     [STATUS.ERROR]: '',
   }[status];
 
+  const busy = status === STATUS.TRANSCRIBING || status === STATUS.TRANSLATING;
+
   const micClass = [
     'mic-btn',
-    status === STATUS.LISTENING  && 'is-listening',
-    status === STATUS.TRANSLATING && 'is-translating',
+    status === STATUS.LISTENING   && 'is-listening',
+    busy                          && 'is-translating',
   ]
     .filter(Boolean)
     .join(' ');
@@ -201,10 +159,7 @@ export default function App() {
       </header>
 
       <main className="result-area">
-        {/* key prop forces remount so fade-slide replays on each new transcript */}
         {transcript && <p key={transcript} className="transcript">{transcript}</p>}
-
-        {/* key prop forces AnimatedText to remount and restagger on each new translation */}
         {translation && (
           <AnimatedText
             key={translation}
@@ -213,20 +168,18 @@ export default function App() {
             isSpeaking={speaking}
           />
         )}
-
         {errorMsg && <p key={errorMsg} className="error-msg">{errorMsg}</p>}
       </main>
 
       <div className="mic-area">
-        {/* Wrapper owns the one-time drop-in on mount */}
         <div className="mic-wrapper">
           <button
             onClick={handleMicTap}
-            disabled={status === STATUS.TRANSLATING}
+            disabled={busy}
             className={micClass}
-            aria-label={status === STATUS.LISTENING ? 'Stop listening' : 'Start listening'}
+            aria-label={status === STATUS.LISTENING ? 'Stop recording' : 'Start recording'}
           >
-            {status === STATUS.TRANSLATING ? (
+            {busy ? (
               <span className="spinner" />
             ) : status === STATUS.LISTENING ? (
               <StopIcon />
@@ -235,7 +188,6 @@ export default function App() {
             )}
           </button>
         </div>
-
         <p className="status-label">{statusLabel}</p>
       </div>
 
@@ -254,10 +206,12 @@ export default function App() {
           <button
             type="submit"
             className="text-submit"
-            disabled={!textInput.trim() || status === STATUS.TRANSLATING}
+            disabled={!textInput.trim() || busy}
             aria-label="Translate"
           >
-            →
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 19V5M6 11l6-6 6 6" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
         </form>
       </footer>
