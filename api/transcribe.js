@@ -14,9 +14,12 @@ export default async function handler(req, res) {
 
   try {
     const buffer = Buffer.from(audio, 'base64');
-    // Extract bare subtype: "audio/webm;codecs=opus" → "webm"
-    const ext = mimeType.split('/')[1].split(';')[0];
-    const file = await toFile(buffer, `recording.${ext}`, { type: mimeType });
+    // Strip codec params, map subtype to a Whisper-accepted extension
+    const subtype = mimeType.split('/')[1].split(';')[0].toLowerCase();
+    const EXT_MAP = { webm: 'webm', mp4: 'mp4', ogg: 'ogg', mpeg: 'mpeg', wav: 'wav' };
+    const ext = EXT_MAP[subtype] ?? subtype;
+    const cleanMime = `audio/${subtype}`;
+    const file = await toFile(buffer, `recording.${ext}`, { type: cleanMime });
 
     const { text } = await openai.audio.transcriptions.create({
       file,

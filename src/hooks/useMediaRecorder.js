@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback } from 'react';
 
 function preferredMimeType() {
-  const candidates = ['audio/webm', 'audio/mp4', 'audio/ogg'];
+  // audio/mp4 first: required on iOS/Safari where webm is unsupported
+  const candidates = ['audio/mp4', 'audio/webm', 'audio/ogg'];
   return candidates.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
 }
 
