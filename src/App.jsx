@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { detectAndTranslate } from './api/translate';
 import { transcribeAudio } from './api/transcribe';
 import { useMediaRecorder } from './hooks/useMediaRecorder';
@@ -66,6 +66,13 @@ export default function App() {
 
   const { speak, speaking, cancel } = useSpeechSynthesis();
   const { start: startRecording, stop: stopRecording } = useMediaRecorder();
+
+  useEffect(() => {
+    const el = textInputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [textInput]);
 
   const handleTranslate = useCallback(
     async (text) => {
@@ -214,12 +221,18 @@ export default function App() {
       <footer className="app-footer">
         <form className="text-form" onSubmit={handleTextSubmit}>
           <div className="text-input-wrap">
-            <input
+            <textarea
               ref={textInputRef}
-              type="text"
               className="text-input"
               value={textInput}
+              rows={1}
               onChange={(e) => setTextInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  if (textInput.trim() && !busy) handleTextSubmit(e);
+                }
+              }}
               placeholder="or type here"
             />
           </div>
